@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "BLEDevice.h"
 #include "driver/twai.h"
 #include "xiaomi_cybergear_driver.h"
 
@@ -21,6 +22,48 @@ XiaomiCyberGearDriver cybergear = XiaomiCyberGearDriver(CYBERGEAR_CAN_ID, MASTER
 
 static float pos = 0.0;
 
+// BLE settings
+BLECharacteristic *pSpeedCharacteristic;
+BLEAdvertising *pAdvertising;
+bool deviceConnected = false;
+
+// UUIDs for BLE service and characteristic
+#define SERVICE_UUID "12345678-1234-1234-1234-1234567890AB"
+#define CHARACTERISTIC_UUID "87654321-4321-4321-4321-BA0987654321"
+
+// Callback for when the client connects or disconnects
+class MyServerCallbacks : public BLEServerCallbacks
+{
+  void onConnect(BLEServer *pServer)
+  {
+    deviceConnected = true;
+    Serial.println("Client connected");
+  }
+
+  void onDisconnect(BLEServer *pServer)
+  {
+    deviceConnected = false;
+    Serial.println("Client disconnected");
+    // Restart advertising when the client disconnects
+    pAdvertising->start();
+    Serial.println("Advertising restarted");
+  }
+};
+
+// Callback for when the client writes to the characteristic
+class SpeedCharacteristicCallbacks : public BLECharacteristicCallbacks
+{
+  void onWrite(BLECharacteristic *pCharacteristic)
+  {
+    std::string value = pCharacteristic->getValue();
+    if (value.length() > 0)
+    {
+      speedRef = atof(value.c_str());
+      Serial.println("New speedRef value: " + String(speedRef));
+    }
+  }
+};
+
 void setup()
 {
   USBSerial.begin();
@@ -33,6 +76,34 @@ void setup()
   cybergear.zero_pos();
   cybergear.set_position_ref(0.0); /* set initial rotor position */
   driver_installed = true;
+
+  // BLE Initialization with device name
+  BLEDevice::init("CyberGear"); // Set the BLE device name
+  BLEServer *pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks()); // Set server callbacks for connect/disconnect
+
+  // BLE Service
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+
+  // BLE Characteristic
+  pSpeedCharacteristic = pService->createCharacteristic(
+      CHARACTERISTIC_UUID,
+      BLECharacteristic::PROPERTY_READ |
+          BLECharacteristic::PROPERTY_WRITE);
+  pSpeedCharacteristic->setCallbacks(new SpeedCharacteristicCallbacks());
+  pSpeedCharacteristic->setValue(String(speedRef).c_str()); // Initial value
+
+  // Start BLE service
+  pService->start();
+
+  // Advertising setup
+  pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06); // Functions that control advertising behavior
+  pAdvertising->setMaxPreferred(0x12); // Functions that control advertising behavior
+  pAdvertising->start();               // Start advertising
+  Serial.println("Advertising started");
 }
 
 static void handle_rx_message(twai_message_t &message)
@@ -88,11 +159,14 @@ void loop()
     return;
   }
   check_alerts();
-  unsigned long currentTime = millis();
-  float elapsedTime = currentTime - startTime;
+  // unsigned long currentTime = millis();
+  // float elapsedTime = currentTime - startTime;
 
-  float sineValue = sin(2 * PI * elapsedTime / period);
-  speedRef = maxSpeed * (sineValue + 1.8) / 2;
+  // float sineValue = sin(2 * PI * elapsedTime / period);
+  // speedRef = maxSpeed * (sineValue + 1.8) / 2;
 
   cybergear.set_speed_ref(speedRef);
+
+  // Update the BLE characteristic value
+  pSpeedCharacteristic->setValue(String(speedRef).c_str());
 }
