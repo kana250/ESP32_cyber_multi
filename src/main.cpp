@@ -60,6 +60,8 @@ class SpeedCharacteristicCallbacks : public BLECharacteristicCallbacks
     {
       speedRef = atof(value.c_str());
       Serial.println("New speedRef value: " + String(speedRef));
+      // Immediately apply the new speedRef to the motor
+      cybergear.set_speed_ref(speedRef);
     }
   }
 };
@@ -71,8 +73,7 @@ void setup()
   cybergear.init_twai(RX_PIN, TX_PIN, /*serial_debug=*/true);
 
   cybergear.init_motor(MODE_SPEED);
-  cybergear.set_limit_speed(20.0f); /* set the maximum speed of the motor */
-  cybergear.enable_motor();         /* turn on the motor */
+  cybergear.enable_motor(); /* turn on the motor */
   cybergear.zero_pos();
   cybergear.set_position_ref(0.0); /* set initial rotor position */
   driver_installed = true;
@@ -104,6 +105,10 @@ void setup()
   pAdvertising->setMaxPreferred(0x12); // Functions that control advertising behavior
   pAdvertising->start();               // Start advertising
   Serial.println("Advertising started");
+
+  // Optimize BLE connection parameters for reduced latency
+  pAdvertising->setMinInterval(20); // 20ms
+  pAdvertising->setMaxInterval(40); // 40ms
 }
 
 static void handle_rx_message(twai_message_t &message)
@@ -158,15 +163,17 @@ void loop()
     delay(1000);
     return;
   }
+
+  // Handle CAN communication and alerts
   check_alerts();
+
+  // The main motor control logic remains simple
   // unsigned long currentTime = millis();
   // float elapsedTime = currentTime - startTime;
 
   // float sineValue = sin(2 * PI * elapsedTime / period);
   // speedRef = maxSpeed * (sineValue + 1.8) / 2;
 
+  // Directly set the speedRef to the motor
   cybergear.set_speed_ref(speedRef);
-
-  // Update the BLE characteristic value
-  pSpeedCharacteristic->setValue(String(speedRef).c_str());
 }
