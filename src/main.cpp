@@ -58,10 +58,31 @@ class SpeedCharacteristicCallbacks : public BLECharacteristicCallbacks
     std::string value = pCharacteristic->getValue();
     if (value.length() > 0)
     {
-      speedRef = atof(value.c_str());
-      Serial.println("New speedRef value: " + String(speedRef));
-      // Immediately apply the new speedRef to the motor
-      cybergear.set_speed_ref(speedRef);
+      float receivedValue = atof(value.c_str());
+      Serial.println("New received value: " + String(receivedValue));
+
+      // Check if the received value is 9999 to initialize CAN
+      if (receivedValue == 9999)
+      {
+        Serial.println("Initializing CAN bus...");
+        cybergear.init_twai(RX_PIN, TX_PIN, /*serial_debug=*/true);
+        cybergear.init_motor(MODE_SPEED);
+        cybergear.enable_motor(); // Turn on the motor
+        cybergear.zero_pos();
+        cybergear.set_position_ref(0.0); // Set initial rotor position
+        driver_installed = true;
+        Serial.println("CAN bus initialized.");
+      }
+      else
+      {
+        // Otherwise, update the speedRef
+        speedRef = receivedValue;
+        if (driver_installed)
+        {
+          // Immediately apply the new speedRef to the motor if CAN is initialized
+          cybergear.set_speed_ref(speedRef);
+        }
+      }
     }
   }
 };
@@ -70,13 +91,6 @@ void setup()
 {
   USBSerial.begin();
   delay(100);
-  cybergear.init_twai(RX_PIN, TX_PIN, /*serial_debug=*/true);
-
-  cybergear.init_motor(MODE_SPEED);
-  cybergear.enable_motor(); /* turn on the motor */
-  cybergear.zero_pos();
-  cybergear.set_position_ref(0.0); /* set initial rotor position */
-  driver_installed = true;
 
   // BLE Initialization with device name
   BLEDevice::init("CyberGear"); // Set the BLE device name
@@ -152,27 +166,32 @@ static void check_alerts()
   }
 
   XiaomiCyberGearStatus cybergear_status = cybergear.get_status();
-  float now_pos = cybergear_status.position;
-  USBSerial.println("POS" + String(cybergear_status.position) + " V" + String(cybergear_status.speed) + " T" + String(cybergear_status.torque) + " temp" + String(cybergear_status.temperature));
+  // float now_pos = cybergear_status.position;
+  // USBSerial.println("POS" + String(cybergear_status.position) + " V" + String(cybergear_status.speed) + " T" + String(cybergear_status.torque) + " temp" + String(cybergear_status.temperature));
+
+  USBSerial.print(">position: ");
+  USBSerial.println(String(cybergear_status.position));
+
+  USBSerial.print(">speed: ");
+  USBSerial.println(String(cybergear_status.speed));
+
+  USBSerial.print(">torque: ");
+  USBSerial.println(String(cybergear_status.torque));
+
+  USBSerial.print(">temperature: ");
+  USBSerial.println(String(cybergear_status.temperature));
 }
 
 void loop()
 {
   if (!driver_installed)
   {
-    delay(1000);
+    delay(1000); // If CAN is not initialized, wait
     return;
   }
 
   // Handle CAN communication and alerts
   check_alerts();
-
-  // The main motor control logic remains simple
-  // unsigned long currentTime = millis();
-  // float elapsedTime = currentTime - startTime;
-
-  // float sineValue = sin(2 * PI * elapsedTime / period);
-  // speedRef = maxSpeed * (sineValue + 1.8) / 2;
 
   // Directly set the speedRef to the motor
   cybergear.set_speed_ref(speedRef);
